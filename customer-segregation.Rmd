@@ -1,0 +1,391 @@
+---
+title: "Exam1 Part D. Clustering practice"
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+library(cluster)
+library(dplyr)
+library(magrittr)
+library(ggplot2)
+library(plotly)
+library(data.table)
+library(caret)
+if (!require("ggbiplot")) install.packages("ggbiplot")
+library(tidyr)
+if (!require("mltools")) install.packages("mltools")
+if (!require("cluster")) install.packages("cluster")
+if (!require("factoextra")) install.packages("factoextra")
+library(cluster)
+library(factoextra)
+
+current_date <- as.Date("2014-07-01")
+```
+
+# Notes on Part D submission
+
+Complete this Rmarkdown document, knit it to html or pdf and submit it along with this Rmd file. Write
+
+
+# Problem Statement
+
+An advertisement division of large club store needs to perform customer analysis 
+the store customers in order to create a segmentation for more targeted marketing campaign 
+
+Your task is to identify similar customers and characterize them (at least some of them). 
+In other word perform clustering and identify customers segmentation.
+
+```
+Colomns description:
+People
+  ID: Customer's unique identifier
+  Year_Birth: Customer's birth year
+  Education: Customer's education level
+  Marital_Status: Customer's marital status
+  Income: Customer's yearly household income
+  Kidhome: Number of children in customer's household
+  Teenhome: Number of teenagers in customer's household
+  Dt_Customer: Date of customer's enrollment with the company
+  Recency: Number of days since customer's last purchase
+  Complain: 1 if the customer complained in the last 2 years, 0 otherwise
+
+Products
+
+  MntWines: Amount spent on wine in last 2 years
+  MntFruits: Amount spent on fruits in last 2 years
+  MntMeatProducts: Amount spent on meat in last 2 years
+  MntFishProducts: Amount spent on fish in last 2 years
+  MntSweetProducts: Amount spent on sweets in last 2 years
+  MntGoldProds: Amount spent on gold in last 2 years
+
+Place
+  NumWebPurchases: Number of purchases made through the company’s website
+  NumStorePurchases: Number of purchases made directly in stores
+```
+
+Assume that data was current on 2014-07-01
+
+# 1. Read Dataset and Data Conversion to Proper Data Format
+# Convert Dt_customer to numeric dates
+# Convert Dt_customer to no_days
+Read "m_marketing_campaign.csv" using `data.table::fread` command, examine the data.
+
+> `fread` function of `data.table` read cvs real fast
+
+```{r}
+# fread m_marketing_campaign.csv and save it as df
+df <- data.table::fread('m_marketing_campaign.csv')
+
+# Checking how the data looks like
+head(df)
+
+# Basic stats of the dataframe
+summary(df)
+```
+
+
+
+```{r}
+# Convert Year_Birth to Age (assume that current date is 2014-07-01)
+
+# To convert Year_Birth to Age, generating random days and months to attach to the year.
+# Assuming days varies from 1 - 28 and month varies from 1 - 12
+
+# Random dates uniformly chosed between 1- 28
+Day = floor(runif(length(df$Year_Birth), min=1, max=28))
+
+# Random months uniformly chosen between 1 - 12
+Month = floor(runif(length(df$Year_Birth), min=1, max=12))
+Year = df$Year_Birth
+
+# Created another data frame using the year, month and day
+dyb = data.frame(Year, Month, Day)
+# Combined all to create dates
+dyb$Year_birth = as.Date(with(dyb, paste(Year, Month, Day, sep='-')), "%Y-%m-%d")
+# Added age columns using the birthdates created for all the rows
+df$Age = as.numeric(difftime(current_date, dyb$Year_birth, units='weeks'))/52.25
+
+# Dt_Customer is a date (it is still character), convert it to membership days (name it MembershipDays)
+# hint: note European date format, use as.Date with proper format argument
+
+# Calculated membership days based on the Dt_Customer
+df$MembershipDays = as.numeric(difftime(current_date, as.Date(df$Dt_Customer, "%d-%m-%Y")))
+
+```
+
+```{r}
+# Summarize Education column (use table function)
+table(df$Education)
+
+# Lets treat Education column as ordinal categories and use simple levels for distance calculations
+# Assuming following order of degrees:
+#    HighSchool, Associate, Bachelor, Master, PhD
+# factorize Education column (hint: use factor function with above levels)
+df$Education = factor(df$Education, order=TRUE, levels = c("HighSchool", "Associate", "Bachelor", "Master", "PhD"))
+
+```
+
+```{r}
+# Summarize Education column (use table function)
+table(df$Marital_Status)
+
+# Lets convert single Marital_Status categories for 5 separate binary categories 
+# Divorced, Married, Single, Together and Widow, the value will be 1 if customer 
+# is in that category and 0 if customer is not
+# hint: use dummyVars from caret package, model.matrix or simple comparison (there are only 5 groups)
+
+# One Hot encoding of Marital_Status
+dum = dummyVars(" ~ Marital_Status", df)
+ms_oh <- data.frame(predict(dum, newdata = df))
+df = dplyr::bind_cols(df, ms_oh)
+
+```
+
+```{r}
+# lets remove columns which we will no longer use:
+# remove ID, Year_Birth, Dt_Customer, Marital_Status
+# and save it as df_sel
+
+# Removing ID, Year_Birth, Dt_Customer, Marital_Status from the dataframe
+df_sel = select(df, -1:-2, -4, -8)
+
+# Convert Education to integers 
+# hint: use as.integer function, if you use factor function earlier 
+# properly then HighSchool will be 1, Associate will be 2 and so on)
+df_sel$Education = as.numeric(df$Education)
+
+```
+
+
+```{r}
+# lets scale
+# run scale function on df_sel and save it as df_scale
+# that will be our scaled values which we will use for analysis
+
+df_scale = scale(df_sel)
+```
+
+(5 points)
+
+# 2. Run PCA
+
+```{r}
+# Run PCA on df_scale, make biplot and scree plot/percentage variance explained plot
+# save as pc_out, we will use pc_out$x[,1] and pc_out$x[,2] later for plotting
+pc_out = prcomp(df_scale, scale = TRUE)
+#plot(pc_out$sdev)
+if (!require("devtools")) install.packages("devtools")
+library("devtools")
+install_github("vqv/ggbiplot")
+require(ggbiplot)
+ggbiplot(pc_out)
+
+# Biplot using first two principal components
+biplot = ggbiplot(pcobj = pc_out,
+                  choices = c(1, 2),
+                  var.axes = FALSE)
+
+biplot = biplot + labs(title = "PCA biplot using PC1 / PC2") + theme_minimal()
+
+print(biplot)
+
+```
+
+# Scree plot
+```{r}
+
+# Variance explained by each principal components
+var_explained_df <- data.frame(PC= c(1:21),
+                               var_explained=(pc_out$sdev)^2/sum((pc_out$sdev)^2))
+
+var_explained_df %>%
+  ggplot(aes(x=PC,y=var_explained, group=1))+
+  geom_point(size=4)+
+  geom_line()+
+  labs(title="Scree plot: PCA on scaled data")
+```
+
+`Question: (5 points)`
+Comment on observation (any visible distinct clusters?):
+
+As per the biplot of PC1 and PC2, there is no clear segregation of clusters. 
+One reason for this can be that there is no cluster in the data. Another reason 
+can be that, since the visualization is only using two principal components, we 
+are a not able to see clusters of 21-dimensional subspace in 2-D.
+
+# 3. Cluster with K-Means
+## 3.1 Selecting Number of Clusters
+
+Run K-Means for a range of k-s select one to use later 
+(save it as k_kmeans)
+
+```{r}
+
+km_out_list <- lapply(1:10, function(k) list(
+  k=k,
+  km_out=kmeans(df_scale, k, nstart = 25)))
+
+km_results <- data.frame(
+  k=sapply(km_out_list, function(k) k$k),
+  totss=sapply(km_out_list, function(k) k$km_out$totss),
+  tot_withinss=sapply(km_out_list, function(k) k$km_out$tot.withinss)
+  )
+km_results
+plot_ly(km_results,x=~k,y=~tot_withinss) %>% add_markers() %>% add_paths()
+
+
+
+# Gap statistics
+
+gap_kmeans <- clusGap(df_scale, kmeans, nstart = 10, K.max = 20, B = 100)
+
+plot(gap_kmeans, main = "Gap Statistic: kmeans")
+
+```
+```
+
+
+```
+
+```
+`Question: (5 points)`
+Which k did you choose and why?
+
+# No clear elbow shown in the graph using entire data. While there is somewhat sharp decrease from 1 to 2,
+# suggesting there might be two clusters (not sharp enough to be called en elbow). I see that there is a
+# constant decrease (almost linear), suggesting there might be a higher number of clusters.
+
+# Similar observation using gap-statistics. There is an increase from the 1 to 2
+# but that is not the peak. Constant increase in the cluster, and a peak is observed
+# at 10 clusters.
+
+# As per the gap statistics, the peak is increasing as the number of clusters are increasing
+# We also observed an increase on 2 clusters. This might suggest that there are more number of clusters
+# in the data. If we gap statistics is run for 10 clusters, the peak is at 10, if it is run for
+# 20 clusters, the peak is at 20. Even the elbow plot somewaht suggests that there 
+# might be a higher number of clusters even though there is a drop at 2 clusters.
+
+# I would be choosing 2 as the value of k because both gap statistics and elbow method suggest
+# that there might be 2 clusters. This can be an over simplistic way of categorising the data
+# but it is easier to humanly explain based on the amount of data and information present.
+# Also, the number of observations would be substantial in both the clusters. If we choose
+# a higher number of clusters, say, 10 or 20, it will be harder to explain what differentiates
+# them in English and the number of data points in the clusters might vary a lot.
+
+## 3.2 Clusters Visulalization
+
+Make k-Means clusters with selected k_kmeans (store result as km_out).
+Plot your k_kmeans clusters on biplot (just PC1 vs PC2) by coloring points by their cluster id.
+
+```{r}
+k_kmeans = 2
+#pca_transform = as.data.frame(-pc_out$x[,1:2])
+km_out <- kmeans(df_scale, k_kmeans, nstart = 20)
+
+plot(pc_out$x[,1:2], col = (km_out$cluster + 1),
+    main = "K-Means Clustering Results with K = 2",
+    xlab = "PC1", ylab = "PC2", pch = 20, cex = 1)
+
+#, "#449933", "#888888", "#0D69D0", "#999999", "#000000", "#420420"), 
+fviz_cluster(km_out, data = df_scale,
+             palette = c("#2E9FDF", "#00AFBB", "#449933"), 
+             geom = "point",
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+             )
+
+# km_out = k_kmeans$cluster
+# plot(km_out)
+
+# biplot = biplot + labs(title = "K-means biplot for PC1 / PC2") + theme_minimal()
+```
+`Question: (5 points)`
+Do you see any grouping? Comment on you observation.
+
+Based on the plot of PC1 and PC2, we can see that there are two centroids on the left
+and the right which is diving the data into two clusters. Since, the number of clusters
+are only 2 and the graph is color coded, the clusters can be seen now but there is still
+no cluster visible with naked eyes. If we had more number of clusters, say 8 or 15,
+the data points of different clusters would have been superimposed on one another making
+it more difficult to differentiate the data among clusters.
+
+Therefore, 2 clusters are clearly diving the data between two groups
+
+
+## 3.3 Characterizing Cluster
+
+Perform descriptive statistics analysis on obtained cluster. Based on that does one or more group have a distinct characteristics?
+(5 points)
+Hint: add cluster column to original df dataframe
+
+```{r}
+
+df_sel_new = df_sel
+df_sel_new$Cluster = km_out$cluster
+
+
+tapply(df_sel_new$Income, df_sel_new$Cluster, summary)
+tapply(df_sel_new$MntFruits, df_sel_new$Cluster, summary)
+tapply(df_sel_new$MntFishProducts, df_sel_new$Cluster, summary)
+
+```
+We can see in the summary of these columns based on two clusters that
+customer falling in cluster 1 is falling under relatively less income
+and less purchasing power group. The mean of income is almost half of
+the mean of income of customers falling in cluster 2.
+Even in the case of purchasing power, cluster 1 is spending much less
+on fruits and meat than cluster two. The median of cluster 1 spending
+on fruit is 3.0 while it is 35.0 for cluster 2. Similarly, the median
+of cluster 1 spending on meat is a mere 4.0 while, it is 58.0 for
+cluster 2.
+
+
+# 4. Cluster with Hierarchical Clustering
+
+
+Perform clustering with Hierarchical method.
+Try complete, single and average linkage.
+Plot dendagram, based on it choose linkage and number of clusters, if possible, explain your
+choice.
+
+(5 points)
+
+```{r}
+df_dist <- dist(df_scale)
+hc.complete <- hclust(dist(df_scale), method = "complete")
+hc.average <- hclust(dist(df_scale), method = "average")
+hc.single <- hclust(dist(df_scale), method = "single")
+
+#Please visualize the cluster one by one for each of the hierarchical
+#clusters. Reducing the cex to 0.00001 to make the dendrogram less messy
+
+par(mfrow = c(1, 1))
+plot(hc.complete, main = "Complete Linkage",
+    xlab = "", sub = "", cex = .00001)
+    
+    
+plot(hc.average, main = "Average Linkage",
+    xlab = "", sub = "", cex = .00001)
+    
+    
+plot(hc.single, main = "Single Linkage",
+    xlab = "", sub = "", cex = .00001)
+
+uh_cut <- cutree(hc.average, 16)
+plot(hc.average, cex = 0.00001)
+rect.hclust(hc.average, k = 16, border = 5:10)
+
+
+uh_cut <- cutree(hc.complete, 16)
+plot(hc.complete, cex = 0.00001)
+rect.hclust(hc.complete, k = 16, border = 5:10)
+
+```
+Hierarchichal clustering with complete linkage is showing different clusters with a very high number of cluster.
+With 16 cuts, we are able to differentiate a few clusters in the dendogram but with a small number of clusters,
+the we observe that there is one big cluster and other clusters are having very small number of observations,
+more like outliers.
